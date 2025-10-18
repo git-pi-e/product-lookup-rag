@@ -1,10 +1,12 @@
-langchain
+# Pinned, compatible package set tested with Python 3.11
 langchain-community
+langchain
+langchain-core
 langchain-openai
-pandas
+langchain-neo4j
 neo4j
 openai
 fastapi
 python-dotenv
 uvicorn
-pydantic>=2
+pydantic

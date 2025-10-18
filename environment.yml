@@ -1,0 +1,12 @@
+name: rag311
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pandas
+  - numpy
+  - scipy
+  - neo4j=5.28.*
+  - pip
+  - pip:
+    - -r requirements.txt

@@ -1,6 +1,6 @@
 # Amazon Product Lookup RAG
 
-RAG FastAPI service on a Neo4j product graph: ask for products in natural language; it extracts entities, queries Neo4j with embeddings, and returns grounded results plus similar items.
+RAG FastAPI service on a Neo4j product graph: ask for products in natural language; it extracts entities, queries Neo4j with embeddings, and returns grounded results plus similar items. This project targets Python 3.11 in local and container environments.
 
 ## Requirements
 
@@ -8,25 +8,46 @@ RAG FastAPI service on a Neo4j product graph: ask for products in natural langua
 - Neo4j 5.x reachable
 - OpenAI API key
 
-## Setup
+## Setup (conda recommended)
 
 Copy `example.env` to `.env` and fill values:
 
 ```env
 OPENAI_API_KEY=""
-NEO4J_USER="neo4j"
+NEO4J_USER=""
 NEO4J_PASSWORD=""
-NEO4J_URL="bolt://localhost:7687"
-NEO4J_DATABASE="neo4j"
+NEO4J_URL=""
+NEO4J_DATABASE=""
 EMBEDDINGS_MODEL=text-embedding-3-small
 ```
 
-## Run locally
+## Run locally (Conda)
+
+1. Create environment and install compiled packages via conda-forge:
 
 ```bash
-pip install -r requirements.txt
+conda create -n rag311 -c conda-forge python=3.11 -y
+conda activate rag311
+conda install -c conda-forge pandas numpy scipy neo4j -y
+```
+
+2. Install pip packages (LangChain family + others):
+
+```bash
+pip install --upgrade pip
+pip install --no-cache-dir -r requirements.txt
+```
+
+3. Ingest data and build embeddings:
+
+```bash
 python scripts/ingest.py
 python scripts/setup_embeddings.py
+```
+
+4. Run API:
+
+```bash
 uvicorn app.main:app --reload
 ```
 

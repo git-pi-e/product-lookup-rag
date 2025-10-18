@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from .schemas import QueryRequest, HealthResponse
 from ..services.orchestrator import Orchestrator
 from ..services.agent import agent_run
+from ..services.agent import agent_run_structured
 
 
 router = APIRouter()
@@ -25,3 +26,8 @@ def query(req: QueryRequest):
 def agent_endpoint(req: QueryRequest):
     output = agent_run(req.prompt)
     return {"output": output}
+
+
+@router.post("/agent/structured")
+def agent_structured(req: QueryRequest):
+    return agent_run_structured(req.prompt)

@@ -1,14 +1,27 @@
 import json
 from typing import Any, Dict, List
+import logging
 
-from langchain.agents import (
-    AgentExecutor,
-    LLMSingleActionAgent,
-    AgentOutputParser,
-)
-from langchain.tools import Tool
-from langchain import LLMChain
-from langchain.prompts import StringPromptTemplate
+try:
+    from langchain.agents import (
+        AgentExecutor,
+        AgentOutputParser,
+        create_tool_calling_agent,
+    )
+except ImportError:
+    # Fallbacks for older/newer LangChain layouts
+    try:
+        from langchain.agents.agent import AgentExecutor  # type: ignore
+        from langchain.agents import AgentOutputParser, create_tool_calling_agent  # type: ignore
+    except Exception:  # pragma: no cover
+        from langchain.agents.agent_executor import AgentExecutor  # type: ignore
+        from langchain.agents import AgentOutputParser, create_tool_calling_agent  # type: ignore
+
+try:
+    from langchain_core.tools import Tool
+except ImportError:
+    from langchain.tools import Tool  # type: ignore
+from langchain_core.prompts import StringPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain.schema import AgentAction, AgentFinish
 
@@ -20,20 +33,33 @@ class AgentServices:
     def __init__(self):
         self.llm = LLMService()
         self.retrieval = RetrievalService(embedder=self.llm.embed_text)
+        self.logger = logging.getLogger(__name__)
 
     def tool_query(self, user_prompt: str) -> List[Dict[str, Any]]:
         extracted = self.llm.extract_entities(user_prompt)
         res = self.retrieval.query_by_entities(extracted)
         matches: List[Dict[str, Any]] = []
         for r in res:
-            matches.append({"id": r["p"]["id"], "name": r["p"]["name"]})
+            meta = r.get("_meta", {}) if isinstance(r, dict) else {}
+            matches.append({
+                "id": r["p"]["id"],
+                "name": r["p"]["name"],
+                "retrieval_method": meta.get("retrieval_method"),
+            })
+        self.logger.debug("tool_query: extracted=%s matches=%d", extracted, len(matches))
         return matches
 
     def tool_similarity_search(self, user_prompt: str) -> List[Dict[str, Any]]:
         res = self.retrieval.query_by_prompt_similarity(user_prompt)
         matches: List[Dict[str, Any]] = []
         for r in res:
-            matches.append({"id": r["p"]["id"], "name": r["p"]["name"]})
+            meta = r.get("_meta", {}) if isinstance(r, dict) else {}
+            matches.append({
+                "id": r["p"]["id"],
+                "name": r["p"]["name"],
+                "retrieval_method": meta.get("retrieval_method"),
+            })
+        self.logger.debug("tool_similarity_search: prompt=%s matches=%d", user_prompt, len(matches))
         return matches
 
     def tool_similar_items(self, product_ids_json: str) -> List[Dict[str, Any]]:
@@ -150,17 +176,57 @@ def build_agent() -> AgentExecutor:
 
     prompt = CustomPromptTemplate(template=prompt_template, tools=tools)
     llm = ChatOpenAI(temperature=0, model="gpt-4o")
-    llm_chain = LLMChain(llm=llm, prompt=prompt)
-    output_parser = CustomOutputParser()
-    agent = LLMSingleActionAgent(
-        llm_chain=llm_chain,
-        output_parser=output_parser,
-        stop=["\nObservation:"],
-        allowed_tools=[t.name for t in tools],
-    )
-    return AgentExecutor.from_agent_and_tools(agent=agent, tools=tools, verbose=True)
+    # Use the modern tool-calling agent constructor per current docs
+    agent = create_tool_calling_agent(llm, tools, prompt)
+    return AgentExecutor(agent=agent, tools=tools, verbose=True)
 
 
 def agent_run(prompt: str) -> str:
     executor = build_agent()
     return executor.run(prompt)
+
+
+def agent_run_structured(prompt: str) -> Dict[str, Any]:
+    """Notebook-style deterministic runner that records steps.
+
+    This bypasses the LLM agent and follows the notebook logic:
+    1) Query tool first (deterministic entity-based). 2) If empty, Similarity Search.
+    3) If matches, call Similar Items for up to 5 similar products.
+    Returns a dict with steps and a human-friendly final answer.
+    """
+    services = AgentServices()
+    steps: List[Dict[str, Any]] = []
+
+    # Step 1: Query
+    services.logger.info("Agent structured run: starting Query tool")
+    query_obs = services.tool_query(prompt)
+    steps.append({"tool": "Query", "input": prompt, "observation": query_obs})
+
+    matches = query_obs
+    # Step 2: Similarity fallback
+    if not matches:
+        services.logger.info("Query returned no matches; running Similarity Search")
+        sim_obs = services.tool_similarity_search(prompt)
+        steps.append({"tool": "Similarity Search", "input": prompt, "observation": sim_obs})
+        matches = sim_obs
+
+    # Step 3: Similar Items
+    similar_items: List[Dict[str, Any]] = []
+    if matches:
+        ids = [m["id"] for m in matches if "id" in m]
+        services.logger.info("Fetching similar items for ids=%s", ids)
+        sim_items = services.tool_similar_items(json.dumps(ids))
+        steps.append({"tool": "Similar Items", "input": ids, "observation": sim_items})
+        similar_items = sim_items
+
+    # Build final answer text
+    num_matches = len(matches)
+    lines = [f"Number of matches: {num_matches}"]
+    for m in matches:
+        lines.append(f"{m.get('name')} ({m.get('id')}) - via {m.get('retrieval_method')}")
+    lines.append("Similar items:")
+    for s in similar_items:
+        lines.append(f"{s.get('name')} ({s.get('id')})")
+
+    final_answer = "\n".join(lines)
+    return {"prompt": prompt, "steps": steps, "final_answer": final_answer}

@@ -18,12 +18,26 @@ class Orchestrator:
 
         matches: List[Dict[str, Any]] = []
         for r in results:
-            matches.append({"id": r["p"]["id"], "name": r["p"]["name"]})
+            meta = r.get("_meta", {}) if isinstance(r, dict) else {}
+            matches.append(
+                {
+                    "id": r["p"]["id"],
+                    "name": r["p"]["name"],
+                    "retrieval_method": meta.get("retrieval_method"),
+                }
+            )
 
         if not matches:
             fallback = self.retrieval.query_by_prompt_similarity(prompt)
             for r in fallback:
-                matches.append({"id": r["p"]["id"], "name": r["p"]["name"]})
+                meta = r.get("_meta", {}) if isinstance(r, dict) else {}
+                matches.append(
+                    {
+                        "id": r["p"]["id"],
+                        "name": r["p"]["name"],
+                        "retrieval_method": meta.get("retrieval_method"),
+                    }
+                )
 
         # Compute similar items and cap at 5 by default
         similar: List[Dict[str, Any]] = []
