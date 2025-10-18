@@ -34,35 +34,51 @@ class AgentServices:
         self.llm = LLMService()
         self.retrieval = RetrievalService(embedder=self.llm.embed_text)
         self.logger = logging.getLogger(__name__)
+        # default to INFO; debug can be enabled during troubleshooting
+        self.logger.setLevel(logging.INFO)
 
     def tool_query(self, user_prompt: str) -> List[Dict[str, Any]]:
         extracted = self.llm.extract_entities(user_prompt)
+        self.logger.info("Agent selecting tool: Query")
+        self.logger.debug("Agent tool_query extracted: %s", extracted)
         res = self.retrieval.query_by_entities(extracted)
         matches: List[Dict[str, Any]] = []
         for r in res:
             meta = r.get("_meta", {}) if isinstance(r, dict) else {}
-            matches.append({
-                "id": r["p"]["id"],
-                "name": r["p"]["name"],
-                "retrieval_method": meta.get("retrieval_method"),
-            })
-        self.logger.debug("tool_query: extracted=%s matches=%d", extracted, len(matches))
+            matches.append(
+                {
+                    "id": r["p"]["id"],
+                    "name": r["p"]["name"],
+                    "retrieval_method": meta.get("retrieval_method"),
+                }
+            )
+        self.logger.debug(
+            "tool_query: extracted=%s matches=%d", extracted, len(matches)
+        )
         return matches
 
     def tool_similarity_search(self, user_prompt: str) -> List[Dict[str, Any]]:
+        self.logger.info("Agent selecting tool: Similarity Search")
+        self.logger.debug("Agent tool_similarity_search input: %s", user_prompt)
         res = self.retrieval.query_by_prompt_similarity(user_prompt)
         matches: List[Dict[str, Any]] = []
         for r in res:
             meta = r.get("_meta", {}) if isinstance(r, dict) else {}
-            matches.append({
-                "id": r["p"]["id"],
-                "name": r["p"]["name"],
-                "retrieval_method": meta.get("retrieval_method"),
-            })
-        self.logger.debug("tool_similarity_search: prompt=%s matches=%d", user_prompt, len(matches))
+            matches.append(
+                {
+                    "id": r["p"]["id"],
+                    "name": r["p"]["name"],
+                    "retrieval_method": meta.get("retrieval_method"),
+                }
+            )
+        self.logger.debug(
+            "tool_similarity_search: prompt=%s matches=%d", user_prompt, len(matches)
+        )
         return matches
 
     def tool_similar_items(self, product_ids_json: str) -> List[Dict[str, Any]]:
+        self.logger.info("Agent selecting tool: Similar Items")
+        self.logger.debug("Agent tool_similar_items input: %s", product_ids_json)
         try:
             ids = json.loads(product_ids_json)
             if not isinstance(ids, list):
@@ -175,6 +191,7 @@ def build_agent() -> AgentExecutor:
     ]
 
     prompt = CustomPromptTemplate(template=prompt_template, tools=tools)
+    # deterministic LLM settings for reproducible tool selection where possible
     llm = ChatOpenAI(temperature=0, model="gpt-4o")
     # Use the modern tool-calling agent constructor per current docs
     agent = create_tool_calling_agent(llm, tools, prompt)
@@ -207,7 +224,9 @@ def agent_run_structured(prompt: str) -> Dict[str, Any]:
     if not matches:
         services.logger.info("Query returned no matches; running Similarity Search")
         sim_obs = services.tool_similarity_search(prompt)
-        steps.append({"tool": "Similarity Search", "input": prompt, "observation": sim_obs})
+        steps.append(
+            {"tool": "Similarity Search", "input": prompt, "observation": sim_obs}
+        )
         matches = sim_obs
 
     # Step 3: Similar Items
@@ -223,7 +242,9 @@ def agent_run_structured(prompt: str) -> Dict[str, Any]:
     num_matches = len(matches)
     lines = [f"Number of matches: {num_matches}"]
     for m in matches:
-        lines.append(f"{m.get('name')} ({m.get('id')}) - via {m.get('retrieval_method')}")
+        lines.append(
+            f"{m.get('name')} ({m.get('id')}) - via {m.get('retrieval_method')}"
+        )
     lines.append("Similar items:")
     for s in similar_items:
         lines.append(f"{s.get('name')} ({s.get('id')})")

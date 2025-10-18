@@ -9,57 +9,140 @@ from ..graph import get_graph
 import logging
 
 logger = logging.getLogger(__name__)
+# Default to INFO for this module; keep debug calls available for troubleshooting
+logger.setLevel(logging.INFO)
 
 
 class RetrievalService:
     def __init__(self, embedder):
         self.graph = get_graph()
         self.embedder = embedder
+        # Detect available server-side similarity function (GDS / vector functions)
+        self.gds_fn: str | None = None
+        try:
+            self.gds_fn = self._detect_gds_function()
+        except Exception:
+            self.gds_fn = None
+
+    def _detect_gds_function(self) -> str | None:
+        # probing for common GDS/vector cosine function names
+        candidates = [
+            "gds.similarity.cosine",
+            "gds.alpha.similarity.cosine",
+            "vector.similarity.cosine",
+        ]
+        for fn in candidates:
+            try:
+                test_q = f"RETURN {fn}([0.1,0.2],[0.1,0.2]) AS sim"
+                r = self.graph.query(test_q)
+                if r:
+                    logger.info("Detected server-side similarity function: %s", fn)
+                    return fn
+            except Exception:
+                continue
+        logger.info(
+            "No server-side similarity function detected; will use client-side fallbacks"
+        )
+        return None
 
     def build_cypher(self, extracted_json: str, threshold: float = 0.81) -> str:
         query_data = json.loads(extracted_json)
+        # If a server-side similarity function exists, build the embedding-based WHERE query
+        if self.gds_fn:
+            embeddings_data: List[str] = []
+            for key in query_data.keys():
+                if key != "product":
+                    embeddings_data.append(f"${key}Embedding AS {key}Embedding")
+            query = "WITH " + ",\n".join(embeddings_data) if embeddings_data else ""
+            query += "\nMATCH (p:Product)\n"
+            match_data: List[str] = []
+            for key in query_data.keys():
+                if key != "product":
+                    relationship = entity_relationship_match[key]
+                    match_data.append(f"(p)-[:{relationship}]->({key}Var:{key})")
+            if match_data:
+                query += "MATCH " + ",\n".join(match_data)
 
-        embeddings_data: List[str] = []
-        for key in query_data.keys():
-            if key != "product":
-                embeddings_data.append(f"${key}Embedding AS {key}Embedding")
-        query = "WITH " + ",\n".join(embeddings_data) if embeddings_data else ""
+            similarity_data: List[str] = []
+            for key in query_data.keys():
+                if key != "product":
+                    similarity_data.append(
+                        f"{self.gds_fn}({key}Var.embedding, ${key}Embedding) > {threshold}"
+                    )
+            if similarity_data:
+                query += "\nWHERE " + " AND ".join(similarity_data)
+            query += "\nRETURN p"
+            return query
 
-        query += "\nMATCH (p:Product)\n"
-
-        match_data: List[str] = []
+        # No server-side similarity: fallback to deterministic exact-match by entity values
+        query = "MATCH (p:Product)\n"
+        where_clauses: List[str] = []
         for key in query_data.keys():
             if key != "product":
                 relationship = entity_relationship_match[key]
-                match_data.append(f"(p)-[:{relationship}]->({key}Var:{key})")
-        if match_data:
-            query += "MATCH " + ",\n".join(match_data)
-
-        similarity_data: List[str] = []
-        for key in query_data.keys():
-            if key != "product":
-                similarity_data.append(
-                    f"gds.similarity.cosine({key}Var.embedding, ${key}Embedding) > {threshold}"
-                )
-        if similarity_data:
-            query += "\nWHERE " + " AND ".join(similarity_data)
-
+                # Use case-insensitive match on entity.value
+                query += f"MATCH (p)-[:{relationship}]->({key}Var:{key})\n"
+                where_clauses.append(f"toLower({key}Var.value) = toLower(${key}Value)")
+        if where_clauses:
+            query += "WHERE " + " AND ".join(where_clauses)
         query += "\nRETURN p"
         return query
 
     def query_by_entities(self, extracted_json: str) -> List[Dict[str, Any]]:
         params: Dict[str, Any] = {}
         query_data = json.loads(extracted_json)
-        for key, val in query_data.items():
-            if key != "product":
-                params[f"{key}Embedding"] = self.embedder(str(val))
+        # Prepare params depending on whether server-side similarity is used
+        if self.gds_fn:
+            for key, val in query_data.items():
+                if key != "product":
+                    params[f"{key}Embedding"] = self.embedder(str(val))
+        else:
+            for key, val in query_data.items():
+                if key != "product":
+                    params[f"{key}Value"] = str(val)
         query = self.build_cypher(extracted_json)
+        # First try a deterministic exact-match on entity values (not embeddings).
+        try:
+            exact_keys = [k for k in query_data.keys() if k != "product"]
+            if exact_keys:
+                exact_cypher = "MATCH (p:Product)\n"
+                exact_clauses: List[str] = []
+                for key in exact_keys:
+                    rel = entity_relationship_match[key]
+                    exact_cypher += f"MATCH (p)-[:{rel}]->({key}Var:{key})\n"
+                    exact_clauses.append(
+                        f"toLower({key}Var.value) = toLower(${key}Value)"
+                    )
+                if exact_clauses:
+                    exact_cypher += "WHERE " + " AND ".join(exact_clauses)
+                exact_cypher += "\nRETURN p"
+                exact_params = {
+                    f"{k}Value": str(v) for k, v in query_data.items() if k != "product"
+                }
+                logger.debug(
+                    "Attempting deterministic exact-match query: %s", exact_cypher
+                )
+                logger.debug("Exact params: %s", exact_params)
+                exact_rows = self.graph.query(exact_cypher, params=exact_params)
+                if exact_rows:
+                    logger.info("Exact-match query returned %d rows", len(exact_rows))
+                    for r in exact_rows:
+                        if isinstance(r, dict) and "p" in r:
+                            r.setdefault("_meta", {})[
+                                "retrieval_method"
+                            ] = "entities_exact_match"
+                    return exact_rows
+        except Exception:
+            logger.debug(
+                "Deterministic exact-match check failed, continuing to similarity logic",
+                exc_info=True,
+            )
         try:
             logger.debug("Attempting server-side GDS similarity query")
+            logger.debug("Cypher: %s", query)
+            logger.debug("Params: %s", params)
             results = self.graph.query(query, params=params)
-            logger.debug(
-                "Server query returned %d rows", len(results) if results else 0
-            )
+            logger.info("Server query returned %d rows", len(results) if results else 0)
             # annotate which method returned results
             for r in results:
                 if isinstance(r, dict) and "p" in r:
@@ -74,75 +157,97 @@ class RetrievalService:
                 "gds.similarity" in msg
                 or "Unknown function 'gds.similarity.cosine'" in msg
             ):
+                # Try alternate GDS function name (some GDS versions expose alpha namespace)
+                try:
+                    alt_query = query.replace(
+                        "gds.similarity.cosine", "gds.alpha.similarity.cosine"
+                    )
+                    alt_results = self.graph.query(alt_query, params=params)
+                    for r in alt_results:
+                        if isinstance(r, dict) and "p" in r:
+                            r.setdefault("_meta", {})[
+                                "retrieval_method"
+                            ] = "entities_server_gds_alpha"
+                    logger.info(
+                        "Alternate server-side GDS function succeeded (gds.alpha.*). Returning %d rows",
+                        len(alt_results) if alt_results else 0,
+                    )
+                    return alt_results
+                except Exception as alt_exc:
+                    logger.debug("Alternate GDS function attempt failed: %s", alt_exc)
                 logger.info(
-                    "Falling back to client-side embedding similarity computation"
+                    "Falling back to client-side product-embedding similarity computation"
                 )
-                # Fallback: fetch candidate products and entity embeddings, compute cosine in Python
+                # If entity-level GDS isn't available, compute a combined embedding for all entities
+                # and compare against product embeddings client-side.
                 keys = [k for k in query_data.keys() if k != "product"]
-                # Build OPTIONAL MATCH clauses and collect embeddings per key
-                optional_matches = []
-                collect_returns = ["p.id AS id", "p.name AS name"]
-                for key in keys:
-                    rel = entity_relationship_match[key]
-                    var = f"{key}Var"
-                    optional_matches.append(
-                        f"OPTIONAL MATCH (p)-[:{rel}]->({var}:{key})"
+                if not keys:
+                    return []
+                # Combine entity text into one string (e.g. "color: red category: clothes")
+                combined_text = " ".join([f"{k}: {query_data[k]}" for k in keys])
+                try:
+                    query_emb = self.embedder(combined_text)
+                except Exception:
+                    logger.exception(
+                        "Failed to compute embedding for combined entity text"
                     )
-                    collect_returns.append(
-                        f"collect(DISTINCT {var}.embedding) AS emb_{key}"
-                    )
+                    return []
 
-                cypher = (
-                    "MATCH (p:Product)\n"
-                    + "\n".join(optional_matches)
-                    + "\nRETURN "
-                    + ", ".join(collect_returns)
+                # Fetch product embeddings and compute cosine similarity client-side
+                rows = self.graph.query(
+                    "MATCH (p:Product) WHERE p.embedding IS NOT NULL RETURN p.id AS id, p.name AS name, p.embedding AS embedding"
                 )
-                rows = self.graph.query(cypher)
 
                 def cosine(a, b):
-                    a = np.array(a, dtype=float)
-                    b = np.array(b, dtype=float)
-                    if a.size == 0 or b.size == 0:
+                    try:
+                        a = np.array(a, dtype=float)
+                        b = np.array(b, dtype=float)
+                    except Exception:
                         return 0.0
                     denom = np.linalg.norm(a) * np.linalg.norm(b)
                     if denom == 0:
                         return 0.0
                     return float(np.dot(a, b) / denom)
 
-                results = []
-                threshold = 0.81
+                # Use configurable threshold/top_k from settings
+                from ..config import get_settings
+
+                settings = get_settings()
+                threshold = settings.similarity_threshold
+                top_k = settings.similarity_top_k
+
+                scored: List[Dict[str, Any]] = []
                 for r in rows:
-                    match_all = True
-                    for key in keys:
-                        query_emb = params.get(f"{key}Embedding")
-                        candidate_embs = r.get(f"emb_{key}") or []
-                        # compute max similarity among candidate entity embeddings
-                        max_sim = 0.0
-                        for ce in candidate_embs:
-                            if ce:
-                                try:
-                                    sim = cosine(ce, query_emb)
-                                except Exception:
-                                    sim = 0.0
-                                if sim > max_sim:
-                                    max_sim = sim
-                        if max_sim < threshold:
-                            match_all = False
-                            break
-                    if match_all:
-                        results.append(
-                            {"p": {"id": r.get("id"), "name": r.get("name")}}
-                        )
-                logger.debug(
-                    "Client-side embedding fallback produced %d results", len(results)
+                    emb = r.get("embedding")
+                    if not emb:
+                        continue
+                    sim = cosine(emb, query_emb)
+                    # store score for sorting
+                    candidate_meta = {
+                        "retrieval_method": "entities_client_product_embedding",
+                        "score": sim,
+                    }
+                    scored.append(
+                        {
+                            "p": {"id": r.get("id"), "name": r.get("name")},
+                            "_meta": candidate_meta,
+                        }
+                    )
+
+                # Filter and sort
+                scored = [c for c in scored if c["_meta"]["score"] >= threshold]
+                scored.sort(
+                    key=lambda x: x.get("_meta", {}).get("score", 0), reverse=True
                 )
-                for r in results:
-                    if isinstance(r, dict) and "p" in r:
-                        r.setdefault("_meta", {})[
-                            "retrieval_method"
-                        ] = "entities_client_fallback"
-                return results
+                scored = scored[:top_k]
+
+                logger.info(
+                    "Client-side product-embedding fallback returned %d results (threshold=%s top_k=%d)",
+                    len(scored),
+                    threshold,
+                    top_k,
+                )
+                return scored
             raise
 
     def query_by_prompt_similarity(

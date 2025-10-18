@@ -1,9 +1,16 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from pydantic import BaseModel
 
 from .schemas import QueryRequest, HealthResponse
 from ..services.orchestrator import Orchestrator
 from ..services.agent import agent_run
 from ..services.agent import agent_run_structured
+from ..graph import get_graph
+
+
+class CypherRequest(BaseModel):
+    cypher: str
+    params: dict | None = None
 
 
 router = APIRouter()
@@ -31,3 +38,12 @@ def agent_endpoint(req: QueryRequest):
 @router.post("/agent/structured")
 def agent_structured(req: QueryRequest):
     return agent_run_structured(req.prompt)
+
+
+@router.post("/debug/cypher")
+def debug_cypher(req: CypherRequest, request: Request):
+    """Execute a read-only Cypher query and return rows. Use only in trusted/dev environments."""
+    graph = get_graph()
+    params = req.params or {}
+    rows = graph.query(req.cypher, params=params)
+    return {"x_request_id": request.headers.get("x-request-id"), "rows": rows}
