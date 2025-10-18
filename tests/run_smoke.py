@@ -26,6 +26,10 @@ def _inject_langchain_mocks():
 
     agents_mod.AgentExecutor = AgentExecutor
     agents_mod.create_tool_calling_agent = create_tool_calling_agent
+    # simple AgentOutputParser base for subclassing
+    class AgentOutputParser:
+        pass
+    agents_mod.AgentOutputParser = AgentOutputParser
 
     # langchain.tools / langchain_core.tools
     tools_mod = types.ModuleType("langchain.tools")
@@ -81,6 +85,9 @@ def _inject_langchain_mocks():
             "langchain.schema": schema_mod,
         }
     )
+    # Ensure submodule names referenced by fallbacks are present
+    sys.modules["langchain.agents.agent_executor"] = agents_mod
+    sys.modules["langchain.agents.agent"] = agents_mod
 
 
 _inject_langchain_mocks()

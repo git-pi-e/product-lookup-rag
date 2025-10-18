@@ -16,8 +16,9 @@ class Settings(BaseModel):
     neo4j_password: str = os.getenv("NEO4J_PASSWORD", "")
     neo4j_database: Optional[str] = os.getenv("NEO4J_DATABASE") or None
     embeddings_model: str = os.getenv("EMBEDDINGS_MODEL", "text-embedding-3-small")
-    similarity_threshold: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.65"))
-    similarity_top_k: int = int(os.getenv("SIMILARITY_TOP_K", "10"))
+    # Lower default similarity threshold to make retrieval more permissive during debugging
+    similarity_threshold: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.2"))
+    similarity_top_k: int = int(os.getenv("SIMILARITY_TOP_K", "50"))
 
 
 def get_settings() -> Settings:

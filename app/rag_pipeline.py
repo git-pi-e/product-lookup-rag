@@ -152,7 +152,7 @@ class RAGService:
 
         query_common_entities = """
             MATCH (p:Product {id: $product_id})-->(entity),
-                  (n:Product)-->(entity)
+                (n:Product)-->(entity)
             WHERE p.id <> n.id
             WITH n, COUNT(DISTINCT entity) AS commonEntities
             WHERE commonEntities >= $threshold
