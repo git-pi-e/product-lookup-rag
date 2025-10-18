@@ -1,0 +1,10 @@
+langchain
+langchain-community
+langchain-openai
+pandas
+neo4j
+openai
+fastapi
+python-dotenv
+uvicorn
+pydantic>=2

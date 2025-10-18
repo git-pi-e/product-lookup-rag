@@ -1,0 +1,85 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual env
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test and coverage related
+.coverage
+.tox/
+.nox/
+.pytest_cache/
+.mypy_cache/
+coverage.xml
+htmlcov/
+.cache/
+pytestdebug.log
+
+# Logs
+*.log
+
+# Local env files
+.env
+.env.*
+*.env
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Docker
+docker-compose.override.yml
+.docker/
+docker-compose-debug.yml
+
+# Other
+node_modules/
+*.sqlite3
+data/
+tmp/
+temp/
+logs/
+
+# Git
+.git/
+
+# Custom project files
+*.ipynb

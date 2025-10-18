@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-rag-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: product-rag-api
+  template:
+    metadata:
+      labels:
+        app: product-rag-api
+    spec:
+      containers:
+        - name: api
+          image: product-rag-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: product-rag-secrets
+                  key: OPENAI_API_KEY
+            - name: NEO4J_URL
+              value: "bolt://neo4j:7687"
+            - name: NEO4J_USER
+              value: "neo4j"
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: product-rag-secrets
+                  key: NEO4J_PASSWORD
+            - name: NEO4J_DATABASE
+              value: "neo4j"
+            - name: EMBEDDINGS_MODEL
+              value: "text-embedding-3-small"
+
+
