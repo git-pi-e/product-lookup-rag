@@ -1,0 +1,99 @@
+@startuml
+' Project Workflow Diagram for product-lookup-rag
+' Shows ingestion, embedding, storage into Neo4j, GDS detection, retrieval pathways,
+' agent orchestration and Docker build/cache
+
+skinparam monochrome true
+skinparam dpi 150
+skinparam defaultFontName Arial
+
+actor Developer
+participant "scripts/ingest.py" as Ingest
+participant "scripts/setup_embeddings.py" as SetupEmbeddings
+participant "OpenAI Embedding API" as OpenAI
+participant "Neo4j DB" as Neo4j
+participant "App: graph.get_graph()" as Graph
+participant "App: retrieval.py" as Retrieval
+participant "App: agent.py" as Agent
+participant "FastAPI (app.main)" as API
+participant "Client (curl / UI)" as Client
+participant "Docker Build" as Docker
+
+== Ingest & Embeddings ==
+Developer -> Ingest: run ingest.py (source data -> nodes/relationships)
+Ingest -> Neo4j: CREATE/MERGE Product nodes + properties
+note right: deterministic IDs/parameters used
+
+Developer -> SetupEmbeddings: run setup_embeddings.py (--dry-run optional)
+SetupEmbeddings -> Neo4j: query product content to embed
+SetupEmbeddings -> OpenAI: request embeddings (text-embedding-3-small)
+OpenAI --> SetupEmbeddings: embedding vectors
+SetupEmbeddings -> Neo4j: SET p.embedding = [float,...]
+note right: idempotent via content hash; checks existing dims
+
+== App Startup / Graph Connection ==
+Docker -> Graph: start app in container (reads .env)
+Graph -> Neo4j: connect using NEO4J_URL/USER/PASS/DB
+Graph --> Neo4j: If DB not reachable, try alternate DB names
+Graph -> Graph: cached connection returned
+
+== GDS / Similarity Detection ==
+Retrieval -> Neo4j: test for server-side functions
+Retrieval -> Neo4j: RETURN gds.similarity.cosine([0.1],[0.1])
+Neo4j --> Retrieval: success or exception
+alt gds available
+    Retrieval -> Retrieval: set server_similarity_fn = "gds.similarity.cosine"
+else fallback
+    Retrieval -> Retrieval: server_similarity_fn = None
+    Retrieval -> Retrieval: plan client-side numpy cosine
+end
+
+== Retrieval Flow (Query by Entities) ==
+Client -> API: POST /query {entities, product, prompt}
+API -> Agent: optional agent run or direct Retrieval.query_by_entities
+Retrieval -> Neo4j: Deterministic exact-match on entity values (first)
+alt exact-match found
+    Neo4j --> Retrieval: rows (return as entities_exact_match)
+    Retrieval -> API: return rows to Client
+else no exact-match
+    Retrieval -> Neo4j: If server_similarity_fn
+        -> run server-side similarity query (gds.cosine projection or vector.similarity)
+    Neo4j --> Retrieval: top-k vector matches (if any)
+    alt server returned results
+        Retrieval -> API: return similarity results with retrieval_method metadata
+    else server-side failed or no results
+        Retrieval -> Retrieval: load product embeddings from Neo4j
+        Retrieval -> Retrieval: compute cosine similarities in-process (numpy)
+        Retrieval -> API: return client-side similarity results
+    end
+end
+
+== Agent / Tool Orchestration ==
+Client -> API: POST /agent/structured (user prompt)
+API -> Agent: agent_run_structured (temperature=0)
+Agent -> Retrieval: call Query tool or Similarity tool
+Agent -> Agent: logs which tool used, includes retrieval_method in result
+Agent -> API: compose final answer + cited products
+API -> Client: structured JSON with tool provenance
+
+== Debugging & Maintenance Endpoints ==
+Client -> API: GET /debug/cypher?q=... (run arbitrary cypher for debugging)
+API -> Neo4j: executes and returns raw rows (admin only)
+
+== Docker Build & Caching ==
+Developer -> Docker: docker build (use BuildKit)
+Docker -> Docker: COPY environment.yml, requirements.txt first
+Docker -> Docker: create conda/micromamba env
+note right: use cache mounts for conda pkgs and pip
+Docker -> Docker: COPY rest of source (invalidates later)
+Docker -> Docker: set CMD uvicorn app.main:app
+
+== Failure Modes & Fallbacks ==
+note over Retrieval, Neo4j
+- Missing embeddings -> SetupEmbeddings should populate
+- Wrong embedding dim -> log + skip vector ops
+- GDS function not present -> client-side fallback
+- Docker container can't reach Neo4j -> check host.docker.internal or network
+end
+
+@enduml

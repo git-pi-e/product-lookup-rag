@@ -1,4 +1,4 @@
-# Amazon Product Lookup RAG
+# Product Lookup RAG
 
 RAG FastAPI service on a Neo4j product graph: ask for products in natural language; it extracts entities, queries Neo4j with embeddings, and returns grounded results plus similar items. This project targets Python 3.11 in local and container environments.
 
@@ -68,7 +68,7 @@ docker build -t product-rag-api:latest .
 # Option A: pass envs individually
 docker run --rm -p 8000:8000 \
   -e OPENAI_API_KEY=$OPENAI_API_KEY \
-  -e NEO4J_URL=bolt://host.docker.internal:7687 \
+  -e NEO4J_URL=neo4j://host.docker.internal:7687 \
   -e NEO4J_USER=neo4j \
   -e NEO4J_PASSWORD=your_password \
   product-rag-api:latest
