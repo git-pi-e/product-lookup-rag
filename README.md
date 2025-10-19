@@ -79,15 +79,6 @@ docker compose up --build
 ## Kubernetes
 
 ```bash
-kubectl apply -f k8s/secret.example.yaml
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/*.yaml
 kubectl port-forward svc/product-rag-api 8000:80
 ```
-
-## More docs
-
-- docs/CONCEPTS.md (RAG, design, workflow)
-- docs/DOCKERFILE_EXPLAINED.md (line-by-line Dockerfile)
-
-

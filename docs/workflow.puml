@@ -3,9 +3,7 @@
 ' Shows ingestion, embedding, storage into Neo4j, GDS detection, retrieval pathways,
 ' agent orchestration and Docker build/cache
 
-skinparam monochrome true
-skinparam dpi 150
-skinparam defaultFontName Arial
+skin rose
 
 actor Developer
 participant "scripts/ingest.py" as Ingest
@@ -38,33 +36,41 @@ Graph --> Neo4j: If DB not reachable, try alternate DB names
 Graph -> Graph: cached connection returned
 
 == GDS / Similarity Detection ==
-Retrieval -> Neo4j: test for server-side functions
+Retrieval -> Neo4j: test for server-side similarity functions
 Retrieval -> Neo4j: RETURN gds.similarity.cosine([0.1],[0.1])
 Neo4j --> Retrieval: success or exception
 alt gds available
     Retrieval -> Retrieval: set server_similarity_fn = "gds.similarity.cosine"
+    Retrieval -> Retrieval: note "will attempt server-side GDS similarity queries"
 else fallback
     Retrieval -> Retrieval: server_similarity_fn = None
     Retrieval -> Retrieval: plan client-side numpy cosine
+    Retrieval -> Retrieval: note "will use in-process numpy fallback"
 end
 
 == Retrieval Flow (Query by Entities) ==
 Client -> API: POST /query {entities, product, prompt}
 API -> Agent: optional agent run or direct Retrieval.query_by_entities
 Retrieval -> Neo4j: Deterministic exact-match on entity values (first)
+note right: builds parameterized Cypher: MATCH (p:Product) -[:REL]->(E:Entity) WHERE toLower(E.value)=toLower($Value)
 alt exact-match found
     Neo4j --> Retrieval: rows (return as entities_exact_match)
     Retrieval -> API: return rows to Client
 else no exact-match
-    Retrieval -> Neo4j: If server_similarity_fn
-        -> run server-side similarity query (gds.cosine projection or vector.similarity)
-    Neo4j --> Retrieval: top-k vector matches (if any)
-    alt server returned results
+    alt server-side-similarity-configured
+        Retrieval -> Neo4j: PREPARE projection (gds.graph.project or similar)
+        Neo4j --> Retrieval: projection created / already exists
+        Retrieval -> Neo4j: CALL gds.similarity.cosine.stream(projectName, {nodeProjection:'Product', relationshipProjection:{}}) YIELD node1, node2, similarity
+        Neo4j --> Retrieval: raw similarity stream
+        Retrieval -> Retrieval: transform stream to top-k results, attach retrieval_method
         Retrieval -> API: return similarity results with retrieval_method metadata
-    else server-side failed or no results
-        Retrieval -> Retrieval: load product embeddings from Neo4j
+    else server-side not available or failed
+        Retrieval -> Neo4j: MATCH (p:Product) WHERE p.embedding IS NOT NULL RETURN p.id AS id, p.embedding AS emb
+        Neo4j --> Retrieval: rows with embeddings
+        Retrieval -> Retrieval: build query vector from prompt or combined entity text
         Retrieval -> Retrieval: compute cosine similarities in-process (numpy)
-        Retrieval -> API: return client-side similarity results
+        Retrieval -> Retrieval: filter by similarity_threshold and select top_k
+        Retrieval -> API: return client-side similarity results with retrieval_method metadata
     end
 end
 
@@ -94,6 +100,6 @@ note over Retrieval, Neo4j
 - Wrong embedding dim -> log + skip vector ops
 - GDS function not present -> client-side fallback
 - Docker container can't reach Neo4j -> check host.docker.internal or network
-end
+end note
 
 @enduml

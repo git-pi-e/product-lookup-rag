@@ -1,0 +1,65 @@
+@startuml
+' Class diagram for product-lookup-rag
+' Shows key modules and main methods/attributes
+
+skinparam classAttributeIconSize 0
+
+class GraphClient {
+    - uri: str
+    - user: str
+    - password: str
+    - database: str | None
+    + get_graph(): Graph
+    + _connect(): void
+}
+
+class RetrievalService {
+    - graph: Graph
+    - server_similarity_fn: str | None
+    - similarity_threshold: float
+    - similarity_top_k: int
+    + query_by_entities(query_data: dict): List[Product]
+    + query_by_prompt(prompt: str): List[Product]
+    + _detect_gds_function(): str | None
+    + _inspect_product_embeddings(): dict
+}
+
+class AgentService {
+    - llm: LLM
+    + agent_run_structured(user_prompt: str): dict
+    + _call_tool(tool_name: str, args: dict): dict
+}
+
+class LLM {
+    - model_name: str
+    - temperature: float
+    + generate(prompt: str): str
+    + embed(texts: List[str]): List[List[float]]
+}
+
+class IngestScript {
+    + run(source_path: str): None
+    + _create_product_node(doc: dict): None
+}
+
+class SetupEmbeddings {
+    + run(dry_run: bool=False, strict: bool=False): None
+    + _compute_embedding(text: str): List[float]
+}
+
+class APIRouter {
+    + query_endpoint(req): Response
+    + agent_endpoint(req): Response
+    + debug_cypher(q: str): Response
+}
+
+' relationships
+GraphClient "1" -- "1..*" RetrievalService : uses
+AgentService "1" -- "1" LLM : uses
+AgentService "1" -- "1" RetrievalService : calls
+APIRouter "1" -- "1" AgentService : forwards requests
+APIRouter "1" -- "1" RetrievalService : may call
+IngestScript "1" -- "1" GraphClient : writes
+SetupEmbeddings "1" -- "1" GraphClient : reads/writes
+
+@enduml
