@@ -1,6 +1,6 @@
 # Product Lookup RAG
 
-RAG FastAPI service on a Neo4j product graph: ask for products in natural language; it extracts entities, queries Neo4j with embeddings, and returns grounded results plus similar items. This project targets Python 3.11 in local and container environments.
+RAG FastAPI service on a Neo4j product graph: ask for products in natural language; it extracts entities, queries Neo4j with embeddings, and returns grounded results plus similar items.
 
 ## Requirements
 
@@ -18,7 +18,7 @@ NEO4J_USER=""
 NEO4J_PASSWORD=""
 NEO4J_URL=""
 NEO4J_DATABASE=""
-EMBEDDINGS_MODEL=text-embedding-3-small
+EMBEDDINGS_MODEL=
 ```
 
 ## Run locally (Conda)
@@ -67,13 +67,11 @@ Build and run:
 docker build -t product-rag-api:latest .
 # Option A: pass envs individually
 docker run --rm -p 8000:8000 \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
-  -e NEO4J_URL=neo4j://host.docker.internal:7687 \
-  -e NEO4J_USER=neo4j \
-  -e NEO4J_PASSWORD=your_password \
+  --env-file .env \
   product-rag-api:latest
+# OR
 # Option B: use compose to load .env
-docker compose up --build
+docker compose up --build -d
 ```
 
 ## Kubernetes
