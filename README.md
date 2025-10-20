@@ -1,6 +1,6 @@
 # Product Lookup RAG
 
-RAG FastAPI service on a Neo4j product graph: ask for products in natural language; it extracts entities, queries Neo4j with embeddings, and returns grounded results plus similar items.
+RAG FastAPI service on a Neo4j product graph: ask for products in natural language; it extracts entities, queries Neo4j with embeddings, and returns grounded results plus similar items. 
 
 ## Requirements
 
