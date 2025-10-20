@@ -8,7 +8,7 @@ RAG FastAPI service on a Neo4j product graph: ask for products in natural langua
 - Neo4j 5.x reachable
 - OpenAI API key
 
-## Setup (conda recommended)
+## Setup
 
 Copy `example.env` to `.env` and fill values:
 
@@ -21,7 +21,7 @@ NEO4J_DATABASE=""
 EMBEDDINGS_MODEL=
 ```
 
-## Run locally (Conda)
+## Run locally
 
 1. Create environment and install compiled packages via conda-forge:
 
@@ -31,7 +31,7 @@ conda activate rag311
 conda install -c conda-forge pandas numpy scipy neo4j -y
 ```
 
-2. Install pip packages (LangChain family + others):
+2. Install pip packages:
 
 ```bash
 pip install --upgrade pip
