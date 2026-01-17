@@ -83,3 +83,8 @@ logs/
 
 # Custom project files
 *.ipynb
+.vercel
+.svelte-kit/
+.vite/
+.vite-temp/
+pnpm-workspace.yaml
